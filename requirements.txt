@@ -1,2 +1,8 @@
 streamlit
 pandas
+altair
+gspread
+google-auth
+google-api-python-client
+reportlab
+xlsxwriter
