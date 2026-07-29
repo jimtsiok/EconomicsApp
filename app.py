@@ -44,7 +44,7 @@ CUSTOM_OPTIONS_SHEET = "PH v50 - Προσαρμοσμένες Επιλογές"
 FINANCIAL_CLOSES_SHEET = "PH v50 - Κλεισίματα Περιόδων"
 ANALYTICS_TARGETS_SHEET = "PH v50 - Στόχοι Ανάλυσης"
 
-APP_VERSION = "v59"
+APP_VERSION = "v60"
 
 CUSTOM_OPTION = "➕ Προσθήκη δικής μου επιλογής"
 
@@ -1849,6 +1849,8 @@ SHEET_SCHEMAS = {
         "ημερομηνία",
         "τύπος",
         "ποσό",
+        "σχετική_κίνηση",
+        "πηγή_χρημάτων",
         "σημειώσεις",
         "καταχωρήθηκε",
     ],
@@ -2588,7 +2590,7 @@ def record_bill_payment(task_row, paid_now, payment_method, notes=""):
     if paid_now <= 0:
         return False
 
-    append_transaction(
+    transaction_id = append_transaction(
         transaction_date=date.today(),
         transaction_type="Έξοδο",
         category=task_row.get("κατηγορία", "Λογαριασμοί"),
@@ -2596,6 +2598,7 @@ def record_bill_payment(task_row, paid_now, payment_method, notes=""):
         amount=paid_now,
         payment_method=payment_method,
         recurring=task_row.get("επανάληψη", "Καμία") != "Καμία",
+        money_source="Υπόλοιπο μήνα",
         notes=(
             f"Πληρωμή υποχρέωσης {task_row.get('id', '')}. "
             f"RF: {task_row.get('rf', '')}. {notes}"
@@ -3113,21 +3116,27 @@ def append_debt_movement(
     movement_type,
     amount,
     notes="",
+    related_transaction_id="",
+    money_source="",
 ):
+    movement_id = create_id("DM")
     debt_movements_ws.append_row(
         [
-            create_id("DM"),
+            movement_id,
             debt_id,
             debt_name,
             movement_date.isoformat(),
             movement_type,
             float(amount),
+            related_transaction_id,
+            money_source,
             notes,
             datetime.now().isoformat(timespec="seconds"),
         ],
         value_input_option="USER_ENTERED",
     )
     refresh_data()
+    return movement_id
 
 
 def calculate_fixed_installment(principal, annual_rate_percent, total_installments):
@@ -4745,35 +4754,130 @@ def find_savings_by_transaction(transaction_id):
     return None
 
 
-def delete_savings_with_counterpart(savings_id):
-    savings_record = find_record_by_id(savings_ws, savings_id)
-    if not savings_record:
+def find_records_by_field(worksheet, field_name, field_value):
+    values = get_all_values_with_retry(worksheet, attempts=3)
+    if not values or field_name not in values[0]:
+        return []
+    headers = values[0]
+    idx = headers.index(field_name)
+    found = []
+    for row in values[1:]:
+        current = row[idx] if idx < len(row) else ""
+        if str(current).strip() == str(field_value).strip():
+            padded = row + [""] * max(0, len(headers) - len(row))
+            found.append(dict(zip(headers, padded[:len(headers)])))
+    return found
+
+
+def find_transactions_for_task(task_id):
+    values = get_all_values_with_retry(transactions_ws, attempts=3)
+    if not values or "σημειώσεις" not in values[0]:
+        return []
+    headers = values[0]
+    idx = headers.index("σημειώσεις")
+    marker = f"Πληρωμή υποχρέωσης {task_id}."
+    found = []
+    for row in values[1:]:
+        notes = row[idx] if idx < len(row) else ""
+        if marker in str(notes):
+            padded = row + [""] * max(0, len(headers) - len(row))
+            found.append(dict(zip(headers, padded[:len(headers)])))
+    return found
+
+
+def delete_debt_movement_completely(movement_id, delete_transaction=True):
+    movement = find_record_by_id(debt_movements_ws, movement_id)
+    if not movement:
         return False
-    transaction_id = str(savings_record.get("σχετική_κίνηση", "")).strip()
-    deleted = delete_record_by_id(savings_ws, savings_id)
-    if deleted and transaction_id:
-        delete_record_by_id(transactions_ws, transaction_id)
+    transaction_id = str(movement.get("σχετική_κίνηση", "")).strip()
+    deleted = delete_record_by_id(debt_movements_ws, movement_id)
+    if deleted and delete_transaction and transaction_id:
+        delete_transaction_completely(transaction_id, False)
     refresh_data()
     return deleted
 
 
-def delete_transaction_with_counterpart(transaction_id):
-    transaction_record = find_record_by_id(transactions_ws, transaction_id)
-    if not transaction_record:
+def delete_transaction_completely(transaction_id, delete_debt_movements=True):
+    transaction = find_record_by_id(transactions_ws, transaction_id)
+    if not transaction:
         return False
 
     clear_budget_completion_by_transaction(transaction_id)
-    savings_id = str(
-        transaction_record.get("σχετική_αποταμίευση", "")
+
+    if delete_debt_movements:
+        for movement in find_records_by_field(
+            debt_movements_ws, "σχετική_κίνηση", transaction_id
+        ):
+            movement_id = str(movement.get("id", "")).strip()
+            if movement_id:
+                delete_debt_movement_completely(movement_id, False)
+
+    linked_savings_ids = {
+        str(item.get("id", "")).strip()
+        for item in find_records_by_field(
+            savings_ws, "σχετική_κίνηση", transaction_id
+        )
+        if str(item.get("id", "")).strip()
+    }
+    direct_savings_id = str(
+        transaction.get("σχετική_αποταμίευση", "")
     ).strip()
-    if not savings_id:
-        savings_record = find_savings_by_transaction(transaction_id)
-        savings_id = str(savings_record.get("id", "")).strip()             if savings_record else ""
+    if direct_savings_id:
+        linked_savings_ids.add(direct_savings_id)
+
     deleted = delete_record_by_id(transactions_ws, transaction_id)
-    if deleted and savings_id:
-        delete_record_by_id(savings_ws, savings_id)
+    if deleted:
+        for savings_id in linked_savings_ids:
+            delete_record_by_id(savings_ws, savings_id)
+
     refresh_data()
     return deleted
+
+
+def delete_savings_completely(savings_id):
+    savings_record = find_record_by_id(savings_ws, savings_id)
+    if not savings_record:
+        return False
+    transaction_id = str(
+        savings_record.get("σχετική_κίνηση", "")
+    ).strip()
+    if transaction_id:
+        return delete_transaction_completely(transaction_id)
+    return delete_record_by_id(savings_ws, savings_id)
+
+
+def delete_task_completely(task_id):
+    if not find_record_by_id(tasks_ws, task_id):
+        return False
+    for transaction in find_transactions_for_task(task_id):
+        transaction_id = str(transaction.get("id", "")).strip()
+        if transaction_id:
+            delete_transaction_completely(transaction_id)
+    deleted = delete_record_by_id(tasks_ws, task_id)
+    refresh_data()
+    return deleted
+
+
+def delete_debt_completely(debt_id):
+    if not find_record_by_id(debts_ws, debt_id):
+        return False
+    for movement in find_records_by_field(
+        debt_movements_ws, "debt_id", debt_id
+    ):
+        movement_id = str(movement.get("id", "")).strip()
+        if movement_id:
+            delete_debt_movement_completely(movement_id)
+    deleted = delete_record_by_id(debts_ws, debt_id)
+    refresh_data()
+    return deleted
+
+
+def delete_savings_with_counterpart(savings_id):
+    return delete_savings_completely(savings_id)
+
+
+def delete_transaction_with_counterpart(transaction_id):
+    return delete_transaction_completely(transaction_id)
 
 
 def month_transaction_balance(dataframe, year, month):
@@ -6279,7 +6383,7 @@ elif page == "➕ Νέα καταχώρηση εξόδων / εσόδων":
                     ):
                         if not confirm_recent_delete:
                             st.warning("Επίλεξε πρώτα την επιβεβαίωση.")
-                        elif delete_record_by_id(transactions_ws, recent_id):
+                        elif delete_transaction_completely(recent_id):
                             st.success("Η καταχώρηση διαγράφηκε.")
                             st.rerun()
 
@@ -6925,7 +7029,7 @@ elif page == "🧾 Υποχρεώσεις":
                     ):
                         if not confirm_delete:
                             st.warning("Επίλεξε πρώτα την επιβεβαίωση.")
-                        elif delete_record_by_id(tasks_ws, record_id):
+                        elif delete_task_completely(record_id):
                             st.success("Η καταχώρηση διαγράφηκε.")
                             st.rerun()
 
@@ -8420,7 +8524,7 @@ elif page == "💳 Δάνεια / Κάρτες":
             ):
                 if not confirm_delete:
                     st.warning("Επίλεξε πρώτα την επιβεβαίωση.")
-                elif delete_record_by_id(debts_ws, debt_row["id"]):
+                elif delete_debt_completely(debt_row["id"]):
                     st.success("Η οφειλή διαγράφηκε.")
                     st.rerun()
 
@@ -8466,16 +8570,8 @@ elif page == "💳 Δάνεια / Κάρτες":
                 ):
                     st.warning("Δεν επαρκεί η αποταμίευση.")
                 else:
-                    append_debt_movement(
-                        debt_row["id"],
-                        debt_row["όνομα"],
-                        payment_date,
-                        "Πληρωμή",
-                        payment_amount,
-                        payment_note,
-                    )
                     if payment_source == "Αποταμίευση":
-                        append_savings_withdrawal(
+                        payment_transaction_id = append_savings_withdrawal(
                             withdrawal_date=payment_date,
                             amount=payment_amount,
                             transaction_type="Έξοδο",
@@ -8486,7 +8582,7 @@ elif page == "💳 Δάνεια / Κάρτες":
                             notes=payment_note,
                         )
                     else:
-                        append_transaction(
+                        payment_transaction_id = append_transaction(
                             transaction_date=payment_date,
                             transaction_type="Έξοδο",
                             category="Δάνεια / Κάρτες",
@@ -8497,6 +8593,17 @@ elif page == "💳 Δάνεια / Κάρτες":
                             notes=payment_note,
                             money_source="Υπόλοιπο μήνα",
                         )
+
+                    append_debt_movement(
+                        debt_row["id"],
+                        debt_row["όνομα"],
+                        payment_date,
+                        "Πληρωμή",
+                        payment_amount,
+                        payment_note,
+                        related_transaction_id=payment_transaction_id,
+                        money_source=payment_source,
+                    )
                     st.success("Η πληρωμή καταχωρίστηκε.")
                     st.rerun()
 
