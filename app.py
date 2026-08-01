@@ -4726,6 +4726,7 @@ def append_savings_withdrawal(
     notes="",
     reference_year=None,
     reference_month=None,
+    activity="Γενικά",
 ):
     amount = float(amount)
     current_total = savings_total(
@@ -4747,6 +4748,7 @@ def append_savings_withdrawal(
         notes=notes,
         reference_year=reference_year,
         reference_month=reference_month,
+        activity=activity,
     )
     savings_id = append_savings_entry(
         withdrawal_date,
@@ -6293,6 +6295,7 @@ elif page == "🧮 Καθημερινές κινήσεις":
                     notes=quick_notes,
                     reference_year=quick_reference_year,
                     reference_month=quick_reference_month,
+                    activity=quick_activity,
                 )
             else:
                 append_transaction(
