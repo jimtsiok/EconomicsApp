@@ -2389,7 +2389,7 @@ def append_transaction(
     notes="",
     reference_year=None,
     reference_month=None,
-    activity="Προσωπικό",
+    activity="Γενικά",
 ):
     transaction_id = create_id("KIN")
     transaction_date = (
@@ -2417,7 +2417,7 @@ def append_transaction(
             file_link,
             notes,
             datetime.now().isoformat(timespec="seconds"),
-            activity or "Προσωπικό",
+            activity or "Γενικά",
         ],
         value_input_option="USER_ENTERED",
     )
@@ -2938,7 +2938,7 @@ def prepare_transactions(df):
         "σχετική_αποταμίευση": "",
         "αρχείο": "",
         "σημειώσεις": "",
-        "δραστηριότητα": "Προσωπικό",
+        "δραστηριότητα": "Γενικά",
     }.items():
         if column not in result.columns:
             result[column] = default
@@ -2954,7 +2954,10 @@ def prepare_transactions(df):
     )
     result["δραστηριότητα"] = result["δραστηριότητα"].replace(
         "",
-        "Προσωπικό",
+        "Γενικά",
+    )
+    result["δραστηριότητα"] = result["δραστηριότητα"].replace(
+        {"Προσωπικό": "Γενικά", "Υπηρεσία": "Γενικά"}
     )
 
     result["έτος_αναφοράς"] = result.apply(
@@ -5759,10 +5762,10 @@ if page == "🏠 Με μια ματιά":
     col4.metric("Πάγια μήνα", format_currency(recurring_expenses), border=True)
 
     if "δραστηριότητα" in month_df.columns and not month_df.empty:
-        activity_col1, activity_col2, activity_col3 = st.columns(3)
+        activity_col1, activity_col2 = st.columns(2)
         for activity_label, activity_col in zip(
-            ["Υπηρεσία", "Φωτογραφία", "Προσωπικό"],
-            [activity_col1, activity_col2, activity_col3],
+            ["Γενικά", "Φωτογραφία"],
+            [activity_col1, activity_col2],
         ):
             activity_rows = month_df[
                 month_df["δραστηριότητα"] == activity_label
@@ -6154,8 +6157,11 @@ elif page == "🧮 Καθημερινές κινήσεις":
     st.divider()
     st.subheader("Γρήγορη νέα καταχώριση")
     st.caption(
-        "Η ημερομηνία δείχνει πότε έγινε η πληρωμή. "
-        "Ο μήνας αναφοράς καθορίζει σε ποιον μήνα θα υπολογιστεί."
+        "Η ημερομηνία δείχνει πότε έγινε πραγματικά η πληρωμή/είσπραξη. "
+        "Ο «μήνας που αφορά» καθορίζει σε ποιον μήνα θα υπολογιστεί στα "
+        "σύνολα. Π.χ. αν ο μισθός μπαίνει 31/7 αλλά είναι για τα έξοδα "
+        "του Αυγούστου, βάλε ημερομηνία 31/7 αλλά μήνας που αφορά = "
+        "Αύγουστος, ώστε να υπολογιστεί μαζί με τα έξοδα εκείνου του μήνα."
     )
 
     quick_type = render_choice_buttons(
@@ -6223,10 +6229,10 @@ elif page == "🧮 Καθημερινές κινήσεις":
 
     quick_activity = render_choice_buttons(
         "Δραστηριότητα",
-        ["Προσωπικό", "Υπηρεσία", "Φωτογραφία"],
+        ["Γενικά", "Φωτογραφία"],
         "v61_quick_activity",
-        columns=3,
-    ) or "Προσωπικό"
+        columns=2,
+    ) or "Γενικά"
 
     with st.form("v61_quick_transaction_form", clear_on_submit=True):
         quick_amount_text = st.text_input(
@@ -6365,9 +6371,9 @@ elif page == "🧮 Καθημερινές κινήσεις":
                             step=10.0,
                             format="%.2f",
                         )
-                        edit_activity_options = ["Προσωπικό", "Υπηρεσία", "Φωτογραφία"]
+                        edit_activity_options = ["Γενικά", "Φωτογραφία"]
                         edit_current_activity = str(
-                            quick_row.get("δραστηριότητα", "Προσωπικό")
+                            quick_row.get("δραστηριότητα", "Γενικά")
                         )
                         edit_quick_activity = st.selectbox(
                             "Δραστηριότητα",
@@ -8336,9 +8342,9 @@ elif page == "📊 Ιστορικό":
 
         final_activity = render_choice_buttons(
             "Δραστηριότητα",
-            ["Όλες", "Προσωπικό", "Υπηρεσία", "Φωτογραφία"],
+            ["Όλες", "Γενικά", "Φωτογραφία"],
             "history_activity_buttons",
-            columns=4,
+            columns=3,
         ) or "Όλες"
 
         history_df = transactions_df[
