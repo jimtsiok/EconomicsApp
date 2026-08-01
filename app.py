@@ -8381,7 +8381,8 @@ elif page == "📊 Ιστορικό":
         metric1.metric("Έσοδα", format_currency(history_income), border=True)
         metric2.metric("Έξοδα", format_currency(history_expenses), border=True)
         metric3.metric(
-                        format_currency(history_income - history_expenses),
+            "Υπόλοιπο",
+            format_currency(history_income - history_expenses),
             border=True,
         )
 
