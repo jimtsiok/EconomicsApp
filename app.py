@@ -44,7 +44,7 @@ CUSTOM_OPTIONS_SHEET = "PH v50 - Προσαρμοσμένες Επιλογές"
 FINANCIAL_CLOSES_SHEET = "PH v50 - Κλεισίματα Περιόδων"
 ANALYTICS_TARGETS_SHEET = "PH v50 - Στόχοι Ανάλυσης"
 
-APP_VERSION = "v63"
+APP_VERSION = "v64"
 
 CUSTOM_OPTION = "➕ Προσθήκη δικής μου επιλογής"
 
@@ -1795,6 +1795,7 @@ SHEET_SCHEMAS = {
         "αρχείο",
         "σημειώσεις",
         "καταχωρήθηκε",
+        "δραστηριότητα",
     ],
     REMINDERS_SHEET: [
         "id",
@@ -2388,6 +2389,7 @@ def append_transaction(
     notes="",
     reference_year=None,
     reference_month=None,
+    activity="Προσωπικό",
 ):
     transaction_id = create_id("KIN")
     transaction_date = (
@@ -2415,6 +2417,7 @@ def append_transaction(
             file_link,
             notes,
             datetime.now().isoformat(timespec="seconds"),
+            activity or "Προσωπικό",
         ],
         value_input_option="USER_ENTERED",
     )
@@ -2935,6 +2938,7 @@ def prepare_transactions(df):
         "σχετική_αποταμίευση": "",
         "αρχείο": "",
         "σημειώσεις": "",
+        "δραστηριότητα": "Προσωπικό",
     }.items():
         if column not in result.columns:
             result[column] = default
@@ -2947,6 +2951,10 @@ def prepare_transactions(df):
     result["πηγή_χρημάτων"] = result["πηγή_χρημάτων"].replace(
         "",
         "Υπόλοιπο μήνα",
+    )
+    result["δραστηριότητα"] = result["δραστηριότητα"].replace(
+        "",
+        "Προσωπικό",
     )
 
     result["έτος_αναφοράς"] = result.apply(
@@ -5654,12 +5662,12 @@ with st.sidebar:
         "Μετάβαση",
         [
             "🏠 Με μια ματιά",
-            "🧮 Μηνιαία οικονομική διαχείριση",
+            "🧮 Καθημερινές κινήσεις",
             "💰 Αποταμίευση",
             "📈 Οικονομική οργάνωση",
             "📊 Ιστορικό",
+            "💼 Φωτογραφία (επιχείρηση)",
             "💳 Δάνεια / Κάρτες",
-            "📁 Έγγραφα / Εγγυήσεις",
             "✏️ Διαχείριση δεδομένων",
             "⚙️ Ρυθμίσεις",
         ],
@@ -5750,34 +5758,24 @@ if page == "🏠 Με μια ματιά":
     col3.metric("Υπόλοιπο μήνα", format_currency(monthly_balance), border=True)
     col4.metric("Πάγια μήνα", format_currency(recurring_expenses), border=True)
 
-    current_plan = budget_plan_summary(current_month.year, current_month.month)
-    next_month_date = (current_month + pd.offsets.MonthBegin(1))
-    next_plan = budget_plan_summary(next_month_date.year, next_month_date.month)
-
-    st.subheader("Προϋπολογισμός τώρα και μετά")
-    plan_col1, plan_col2 = st.columns(2)
-    with plan_col1:
-        with st.container(border=True):
-            st.write(f"**{current_month.strftime('%m/%Y')}**")
-            if current_plan["exists"]:
-                st.metric("Προβλεπόμενο διαθέσιμο", format_currency(current_plan["available"]))
-                st.caption(
-                    f"Έσοδα {format_currency(current_plan['income'])} · "
-                    f"Έξοδα {format_currency(current_plan['expenses'])}"
-                )
-            else:
-                st.caption("Δεν έχει δημιουργηθεί ακόμη σχέδιο για τον μήνα.")
-    with plan_col2:
-        with st.container(border=True):
-            st.write(f"**{next_month_date.strftime('%m/%Y')}**")
-            if next_plan["exists"]:
-                st.metric("Προβλεπόμενο διαθέσιμο", format_currency(next_plan["available"]))
-                st.caption(
-                    f"Έσοδα {format_currency(next_plan['income'])} · "
-                    f"Έξοδα {format_currency(next_plan['expenses'])}"
-                )
-            else:
-                st.caption("Δεν έχει δημιουργηθεί ακόμη σχέδιο για τον μήνα.")
+    if "δραστηριότητα" in month_df.columns and not month_df.empty:
+        activity_col1, activity_col2, activity_col3 = st.columns(3)
+        for activity_label, activity_col in zip(
+            ["Υπηρεσία", "Φωτογραφία", "Προσωπικό"],
+            [activity_col1, activity_col2, activity_col3],
+        ):
+            activity_rows = month_df[
+                month_df["δραστηριότητα"] == activity_label
+            ]
+            activity_net = (
+                activity_rows.loc[activity_rows["τύπος"] == "Έσοδο", "ποσό"].sum()
+                - activity_rows.loc[activity_rows["τύπος"] == "Έξοδο", "ποσό"].sum()
+            )
+            activity_col.metric(
+                activity_label,
+                format_currency(activity_net),
+                border=True,
+            )
 
     st.subheader("Δάνεια και κάρτες")
 
@@ -6107,11 +6105,11 @@ if page == "🏠 Με μια ματιά":
 # ΥΠΕΝΘΥΜΙΣΕΙΣ
 # =========================================================
 
-elif page == "🧮 Μηνιαία οικονομική διαχείριση":
-    st.header("Μηνιαία οικονομική διαχείριση")
+elif page == "🧮 Καθημερινές κινήσεις":
+    st.header("Καθημερινές κινήσεις")
     st.caption(
-        "Οργάνωσε τον προϋπολογισμό και τις πραγματικές κινήσεις "
-        "του ίδιου μήνα σε μία ενιαία σελίδα."
+        "Καταχώρησε γρήγορα τα έσοδα και τα έξοδά σου και δες "
+        "τα πάγια του μήνα."
     )
 
     month_short_names = {
@@ -6223,6 +6221,13 @@ elif page == "🧮 Μηνιαία οικονομική διαχείριση":
             f"{format_currency(current_savings_available)}"
         )
 
+    quick_activity = render_choice_buttons(
+        "Δραστηριότητα",
+        ["Προσωπικό", "Υπηρεσία", "Φωτογραφία"],
+        "v61_quick_activity",
+        columns=3,
+    ) or "Προσωπικό"
+
     with st.form("v61_quick_transaction_form", clear_on_submit=True):
         quick_amount_text = st.text_input(
             "Ποσό",
@@ -6298,6 +6303,7 @@ elif page == "🧮 Μηνιαία οικονομική διαχείριση":
                     notes=quick_notes,
                     reference_year=quick_reference_year,
                     reference_month=quick_reference_month,
+                    activity=quick_activity,
                 )
 
             st.success(
@@ -6359,6 +6365,19 @@ elif page == "🧮 Μηνιαία οικονομική διαχείριση":
                             step=10.0,
                             format="%.2f",
                         )
+                        edit_activity_options = ["Προσωπικό", "Υπηρεσία", "Φωτογραφία"]
+                        edit_current_activity = str(
+                            quick_row.get("δραστηριότητα", "Προσωπικό")
+                        )
+                        edit_quick_activity = st.selectbox(
+                            "Δραστηριότητα",
+                            edit_activity_options,
+                            index=(
+                                edit_activity_options.index(edit_current_activity)
+                                if edit_current_activity in edit_activity_options
+                                else 0
+                            ),
+                        )
                         edit_quick_date = st.date_input(
                             "Πραγματική ημερομηνία",
                             value=(
@@ -6400,6 +6419,7 @@ elif page == "🧮 Μηνιαία οικονομική διαχείριση":
                                 "ημερομηνία": edit_quick_date.isoformat(),
                                 "έτος_αναφοράς": edit_quick_year,
                                 "μήνας_αναφοράς": edit_quick_month,
+                                "δραστηριότητα": edit_quick_activity,
                             },
                         )
                         st.success("Η καταχώριση ενημερώθηκε.")
@@ -6424,856 +6444,17 @@ elif page == "🧮 Μηνιαία οικονομική διαχείριση":
                             st.rerun()
 
     st.divider()
-    st.subheader("Οργάνωση του μήνα")
+    st.subheader("Πάγια του μήνα")
     st.caption(
-        "Εδώ βρίσκονται μαζί το σχέδιο του μήνα, οι πραγματικές "
-        "ολοκληρώσεις και τα πάγια."
+        "Εδώ βρίσκονται τα πάγια και οι συνδρομές που αντιστοιχούν "
+        "στον επιλεγμένο μήνα."
     )
 
-    plan_tab, recurring_tab = st.tabs(
+    (recurring_tab,) = st.tabs(
         [
-            "Σχέδιο και ολοκλήρωση",
             "Πάγια του μήνα",
         ]
     )
-
-    with plan_tab:
-        saved_budget = get_monthly_budget_record(
-            monthly_budget_df,
-            budget_year,
-            budget_month,
-        )
-        suggested_fixed, suggested_extra = monthly_budget_suggestions(
-            recurring_df,
-            tasks_df,
-            budget_year,
-            budget_month,
-        )
-
-        selected_plan_summary = budget_plan_summary(budget_year, budget_month)
-        st.subheader("Σύνολο επιλεγμένου μήνα")
-        total_col1, total_col2, total_col3 = st.columns(3)
-        total_col1.metric("Έσοδα", format_currency(selected_plan_summary["income"]), border=True)
-        total_col2.metric("Έξοδα", format_currency(selected_plan_summary["expenses"]), border=True)
-        total_col3.metric("Διαθέσιμο", format_currency(selected_plan_summary["available"]), border=True)
-        if saved_budget:
-            st.caption("Το αποθηκευμένο σχέδιο του μήνα φορτώθηκε από τη Google.")
-        elif selected_plan_summary["exists"]:
-            st.caption("Ο μήνας έχει συμπληρωθεί αυτόματα από τα πάγια που του αναλογούν.")
-        else:
-            st.caption("Δεν υπάρχουν ακόμη ποσά για αυτόν τον μήνα.")
-
-        # Λίγες βασικές γραμμές. Οι υπόλοιπες προστίθενται μόνιμα
-        # από τον ίδιο τον χρήστη.
-        income_fields = [
-            ("μισθός", "Μισθός", "Μισθός"),
-        ]
-        expense_fields = [
-            ("ενοίκιο", "Ενοίκιο", "Σπίτι"),
-            ("κοινόχρηστα", "Κοινόχρηστα", "Σπίτι"),
-        ]
-
-        personal_line_definitions = permanent_budget_lines()
-        personal_income_fields = []
-        personal_expense_fields = []
-
-        for line_index, definition in enumerate(personal_line_definitions):
-            safe_label = normalize_budget_text(definition["label"]).replace(" ", "_")
-            field_code = f"personal_{definition['type']}_{line_index}_{safe_label}"
-            row = (
-                field_code,
-                definition["label"],
-                definition["category"],
-            )
-            if definition["type"] == "Έσοδο":
-                personal_income_fields.append(row)
-            else:
-                personal_expense_fields.append(row)
-
-        month_budget_items_for_personal = get_budget_items_for_month(
-            budget_items_df,
-            budget_year,
-            budget_month,
-        )
-        dynamic_initial_values = {}
-        if not month_budget_items_for_personal.empty:
-            permanent_rows = month_budget_items_for_personal[
-                month_budget_items_for_personal.get(
-                    "Πηγή",
-                    pd.Series(index=month_budget_items_for_personal.index, dtype=str),
-                ).astype(str) == "Μόνιμη γραμμή"
-            ]
-            for field_code, label, category in (
-                personal_income_fields + personal_expense_fields
-            ):
-                matches = permanent_rows[
-                    (permanent_rows["Περιγραφή"].astype(str) == str(label))
-                    & (permanent_rows["Κατηγορία"].astype(str) == str(category))
-                ]
-                if not matches.empty:
-                    dynamic_initial_values[field_code] = float(
-                        parse_number(matches.iloc[-1].get("Ποσό", 0))
-                    )
-
-
-        def initial_budget_value(field_code):
-            if field_code in dynamic_initial_values:
-                return float(dynamic_initial_values[field_code])
-
-            suggested_value = float(
-                parse_number(suggested_fixed.get(field_code, 0))
-            )
-
-            if saved_budget:
-                saved_value = float(
-                    parse_number(saved_budget.get(field_code, 0))
-                )
-                # Αν το αποθηκευμένο πεδίο είναι μηδέν αλλά υπάρχει ενεργό
-                # πάγιο για τον μήνα, εμφανίζουμε την πρόταση του παγίου.
-                return saved_value if saved_value > 0 else suggested_value
-
-            return suggested_value
-
-        budget_values = {}
-        budget_line_settings = {}
-
-        def activate_recurring_from_frequency(checkbox_key, frequency_key):
-            selected_frequency = st.session_state.get(frequency_key, "")
-            if selected_frequency and selected_frequency != "Επίλεξε συχνότητα":
-                st.session_state[checkbox_key] = True
-
-        def render_budget_line(field_code, label, category, item_type):
-            status = get_budget_status_record(
-                budget_status_df,
-                budget_year,
-                budget_month,
-                field_code,
-            )
-
-            with st.container(border=True):
-                amount_col, recurring_col, action_col = st.columns(
-                    [2.1, 1.2, 1.35]
-                )
-
-                with amount_col:
-                    amount = money_text_input(
-                        label,
-                        key=(
-                            f"budget_money_{field_code}_"
-                            f"{budget_year}_{budget_month}"
-                        ),
-                        current_value=initial_budget_value(field_code),
-                    )
-
-                with recurring_col:
-                    recurring_default = (
-                        str(status.get("πάγιο", "Όχι")) == "Ναι"
-                    )
-                    checkbox_key = (
-                        f"budget_recurring_{field_code}_"
-                        f"{budget_year}_{budget_month}"
-                    )
-                    frequency_key = (
-                        f"budget_frequency_{field_code}_"
-                        f"{budget_year}_{budget_month}"
-                    )
-
-                    frequency_options = [
-                        "Επίλεξε συχνότητα",
-                        "Κάθε μήνα",
-                        "Κάθε 2 μήνες",
-                        "Κάθε 3 μήνες",
-                        "Κάθε 6 μήνες",
-                        "Κάθε χρόνο",
-                    ]
-                    saved_frequency = str(status.get("συχνότητα", "")).strip()
-                    if saved_frequency not in frequency_options:
-                        saved_frequency = (
-                            "Κάθε μήνα"
-                            if recurring_default
-                            else "Επίλεξε συχνότητα"
-                        )
-
-                    recurring_check_col, frequency_select_col = st.columns(
-                        [0.75, 1.55]
-                    )
-
-                    with recurring_check_col:
-                        is_recurring = st.checkbox(
-                            "Πάγιο",
-                            value=recurring_default,
-                            key=checkbox_key,
-                        )
-
-                    with frequency_select_col:
-                        frequency = st.selectbox(
-                            "Συχνότητα",
-                            frequency_options,
-                            index=frequency_options.index(saved_frequency),
-                            key=frequency_key,
-                            on_change=activate_recurring_from_frequency,
-                            args=(checkbox_key, frequency_key),
-                        )
-
-                    if frequency == "Επίλεξε συχνότητα":
-                        frequency = "Κάθε μήνα"
-
-                    budget_line_settings[field_code] = {
-                        "label": label,
-                        "category": category,
-                        "item_type": item_type,
-                        "is_recurring": is_recurring,
-                        "frequency": frequency,
-                        "status": status,
-                    }
-
-                completed = (
-                    str(status.get("ολοκληρώθηκε", "Όχι")) == "Ναι"
-                    and str(status.get("σχετική_κίνηση", "")).strip()
-                )
-
-                with action_col:
-                    if completed:
-                        st.success("✓ Ολοκληρώθηκε")
-                        st.caption(
-                            "Έχει καταχωριστεί στις οικονομικές κινήσεις."
-                        )
-                    else:
-                        with st.popover(
-                            "✓ Ολοκληρώθηκε",
-                            use_container_width=True,
-                        ):
-                            if item_type == "Έξοδο":
-                                source = st.radio(
-                                    "Αφαίρεση από",
-                                    [
-                                        "Υπόλοιπο μήνα",
-                                        "Αποταμίευση",
-                                    ],
-                                    key=(
-                                        f"budget_source_{field_code}_"
-                                        f"{budget_year}_{budget_month}"
-                                    ),
-                                )
-                                if (
-                                    source == "Αποταμίευση"
-                                    and amount > savings_total(savings_df)
-                                ):
-                                    st.warning(
-                                        "Το ποσό είναι μεγαλύτερο από "
-                                        "τη διαθέσιμη αποταμίευση."
-                                    )
-                            else:
-                                source = "Υπόλοιπο μήνα"
-                                st.caption(
-                                    "Το έσοδο θα προστεθεί στο γενικό "
-                                    "υπόλοιπο του μήνα."
-                                )
-
-                            confirm_complete = st.button(
-                                "Καταχώρηση κίνησης",
-                                key=(
-                                    f"confirm_budget_{field_code}_"
-                                    f"{budget_year}_{budget_month}"
-                                ),
-                                use_container_width=True,
-                                type="primary",
-                                disabled=(
-                                    amount <= 0
-                                    or (
-                                        item_type == "Έξοδο"
-                                        and source == "Αποταμίευση"
-                                        and amount > savings_total(savings_df)
-                                    )
-                                ),
-                            )
-
-                            if confirm_complete:
-                                transaction_id = complete_budget_entry(
-                                    budget_year,
-                                    budget_month,
-                                    field_code,
-                                    label,
-                                    category,
-                                    item_type,
-                                    amount,
-                                    source,
-                                    is_recurring,
-                                )
-                                if transaction_id:
-                                    recurring_id = str(
-                                        status.get("σχετικό_πάγιο", "")
-                                    )
-                                    if is_recurring:
-                                        recurring_id = (
-                                            create_or_update_budget_recurring(
-                                                recurring_id,
-                                                label,
-                                                category,
-                                                item_type,
-                                                amount,
-                                                frequency,
-                                                budget_year,
-                                                budget_month,
-                                            )
-                                        )
-                                    upsert_budget_status(
-                                        budget_year,
-                                        budget_month,
-                                        field_code,
-                                        label,
-                                        item_type,
-                                        is_recurring,
-                                        frequency,
-                                        True,
-                                        source,
-                                        transaction_id,
-                                        recurring_id,
-                                    )
-                                    st.success("Η κίνηση καταχωρίστηκε.")
-                                    st.rerun()
-
-            return amount
-
-        st.subheader("Έσοδα")
-        for field_code, label, category in income_fields + personal_income_fields:
-            budget_values[field_code] = render_budget_line(
-                field_code,
-                label,
-                category,
-                "Έσοδο",
-            )
-
-        st.subheader("Έξοδα")
-        for field_code, label, category in expense_fields + personal_expense_fields:
-            budget_values[field_code] = render_budget_line(
-                field_code,
-                label,
-                category,
-                "Έξοδο",
-            )
-
-        with st.expander("＋ Νέα μόνιμη γραμμή προϋπολογισμού"):
-            permanent_type = st.radio(
-                "Τύπος γραμμής",
-                ["Έξοδο", "Έσοδο"],
-                horizontal=True,
-                key=f"permanent_budget_type_{budget_year}_{budget_month}",
-            )
-            permanent_label = st.text_input(
-                "Όνομα γραμμής",
-                placeholder="π.χ. Ρεύμα, Bonus, Κατοικίδιο",
-                key=f"permanent_budget_label_{budget_year}_{budget_month}",
-            )
-            permanent_base_categories = (
-                list(EXPENSE_CATEGORIES.keys())
-                if permanent_type == "Έξοδο"
-                else list(INCOME_CATEGORIES.keys())
-            )
-            permanent_category_options = options_with_saved(
-                permanent_base_categories,
-                f"transaction_category_{permanent_type}",
-                include_other=False,
-            )
-            permanent_category = st.selectbox(
-                "Κατηγορία",
-                permanent_category_options,
-                key=f"permanent_budget_category_{budget_year}_{budget_month}",
-            )
-            if st.button(
-                "Αποθήκευση μόνιμης γραμμής",
-                key=f"save_permanent_budget_line_{budget_year}_{budget_month}",
-                use_container_width=True,
-                type="primary",
-            ):
-                if not permanent_label.strip():
-                    st.warning("Γράψε το όνομα της νέας γραμμής.")
-                elif save_permanent_budget_line(
-                    permanent_type,
-                    permanent_label,
-                    permanent_category,
-                ):
-                    st.success("Η γραμμή αποθηκεύτηκε μόνιμα.")
-                    st.rerun()
-                else:
-                    st.info("Η ίδια μόνιμη γραμμή υπάρχει ήδη.")
-
-        st.subheader("Άλλο έσοδο ή έξοδο")
-        st.caption(
-            "Πρόσθεσε μία νέα ξεχωριστή γραμμή και μετά μπορείς "
-            "να προσθέσεις αμέσως ακόμη μία."
-        )
-
-        extra_state_key = (
-            f"budget_manual_rows_{budget_year}_{budget_month}"
-        )
-
-        saved_extra = get_budget_items_for_month(
-            budget_items_df,
-            budget_year,
-            budget_month,
-        )
-        if not saved_extra.empty and "Πηγή" in saved_extra.columns:
-            saved_extra = saved_extra[
-                saved_extra["Πηγή"].astype(str) != "Μόνιμη γραμμή"
-            ].copy()
-
-        if extra_state_key not in st.session_state:
-            st.session_state[extra_state_key] = saved_extra.copy()
-
-        with st.expander("➕ Προσθήκη άλλου εσόδου / εξόδου"):
-            with st.form(
-                f"add_budget_other_{budget_year}_{budget_month}",
-                clear_on_submit=True,
-            ):
-                other_type = st.radio(
-                    "Τύπος",
-                    ["Έξοδο", "Έσοδο"],
-                    horizontal=True,
-                )
-                other_description = st.text_input(
-                    "Τι είναι;",
-                    placeholder="π.χ. Κτηνίατρος, δώρο, επιστροφή χρημάτων",
-                )
-                other_category = st.text_input(
-                    "Κατηγορία, προαιρετικά",
-                    placeholder="π.χ. Υγεία, Σπίτι, Άλλα έσοδα",
-                )
-                other_amount_text = st.text_input(
-                    "Ποσό",
-                    placeholder="0,00",
-                )
-
-                other_col_1, other_col_2 = st.columns(2)
-                with other_col_1:
-                    other_recurring = st.checkbox("Πάγιο")
-                with other_col_2:
-                    other_frequency = st.selectbox(
-                        "Συχνότητα",
-                        [
-                            "Κάθε μήνα",
-                            "Κάθε 2 μήνες",
-                            "Κάθε 3 μήνες",
-                            "Κάθε 6 μήνες",
-                            "Κάθε χρόνο",
-                        ],
-                    )
-
-                add_other = st.form_submit_button(
-                    "Προσθήκη στο σχέδιο μήνα",
-                    use_container_width=True,
-                    type="primary",
-                )
-
-            if add_other:
-                other_amount = float(parse_number(other_amount_text))
-                if not other_description.strip():
-                    st.warning("Γράψε τι είναι το έσοδο ή το έξοδο.")
-                elif other_amount <= 0:
-                    st.warning("Το ποσό πρέπει να είναι μεγαλύτερο από μηδέν.")
-                else:
-                    new_row = pd.DataFrame(
-                        [{
-                            "Περιγραφή": other_description.strip(),
-                            "Κατηγορία": (
-                                other_category.strip()
-                                or (
-                                    "Άλλα έσοδα"
-                                    if other_type == "Έσοδο"
-                                    else "Άλλο έξοδο"
-                                )
-                            ),
-                            "Τύπος": other_type,
-                            "Ποσό": other_amount,
-                            "Πάγιο": "Ναι" if other_recurring else "Όχι",
-                            "Συχνότητα": (
-                                other_frequency if other_recurring else ""
-                            ),
-                            "Ολοκληρώθηκε": "Όχι",
-                            "Πηγή χρημάτων": "Υπόλοιπο μήνα",
-                            "Σχετική κίνηση": "",
-                            "Πηγή": "Χειροκίνητη",
-                            "Σημειώσεις": "",
-                        }]
-                    )
-                    current_rows = st.session_state[extra_state_key]
-                    st.session_state[extra_state_key] = pd.concat(
-                        [current_rows, new_row],
-                        ignore_index=True,
-                    )
-                    st.success("Η γραμμή προστέθηκε.")
-                    st.rerun()
-
-        st.subheader("Πρόσθετες γραμμές")
-        st.caption(
-            "Μπορείς να αλλάξεις, να ολοκληρώσεις ή να διαγράψεις "
-            "οποιαδήποτε πρόσθετη γραμμή."
-        )
-
-        saved_extra = st.session_state[extra_state_key]
-
-        if saved_extra.empty:
-            suggested_rows = pd.DataFrame(suggested_extra)
-            if not suggested_rows.empty:
-                defaults = {
-                    "Τύπος": "Έξοδο",
-                    "Πάγιο": "Όχι",
-                    "Συχνότητα": "",
-                    "Ολοκληρώθηκε": "Όχι",
-                    "Πηγή χρημάτων": "Υπόλοιπο μήνα",
-                    "Σχετική κίνηση": "",
-                    "Πηγή": "Πάγιο",
-                    "Σημειώσεις": "",
-                }
-                for column, default in defaults.items():
-                    if column not in suggested_rows.columns:
-                        suggested_rows[column] = default
-                saved_extra = suggested_rows
-                st.session_state[extra_state_key] = saved_extra.copy()
-
-        # Συνέχεια με τον επεξεργάσιμο πίνακα.
-        saved_extra = saved_extra.copy()
-
-        # Το παρακάτω αρχικό load έχει ήδη γίνει πιο πάνω.
-        # Διατηρούμε μόνο τη λογική προετοιμασίας των στηλών.
-        if saved_extra.empty:
-            saved_extra = pd.DataFrame(suggested_extra)
-            defaults = {
-                "Τύπος": "Έξοδο",
-                "Πάγιο": "Όχι",
-                "Συχνότητα": "",
-                "Ολοκληρώθηκε": "Όχι",
-                "Πηγή χρημάτων": "Υπόλοιπο μήνα",
-                "Σχετική κίνηση": "",
-                "Πηγή": "Χειροκίνητη",
-                "Σημειώσεις": "",
-            }
-            for column, default in defaults.items():
-                if column not in saved_extra.columns:
-                    saved_extra[column] = default
-
-        extra_editor = st.data_editor(
-            saved_extra,
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            key=f"budget_extra_{budget_year}_{budget_month}",
-            column_config={
-                "Περιγραφή": st.column_config.TextColumn(
-                    "Περιγραφή",
-                    required=True,
-                ),
-                "Κατηγορία": st.column_config.TextColumn("Κατηγορία"),
-                "Τύπος": st.column_config.SelectboxColumn(
-                    "Τύπος",
-                    options=["Έξοδο", "Έσοδο"],
-                    default="Έξοδο",
-                ),
-                "Ποσό": st.column_config.NumberColumn(
-                    "Ποσό",
-                    min_value=0.0,
-                    step=10.0,
-                    format="%.2f €",
-                ),
-                "Πάγιο": st.column_config.SelectboxColumn(
-                    "Πάγιο",
-                    options=["Όχι", "Ναι"],
-                    default="Όχι",
-                ),
-                "Συχνότητα": st.column_config.SelectboxColumn(
-                    "Συχνότητα",
-                    options=[
-                        "",
-                        "Κάθε μήνα",
-                        "Κάθε 2 μήνες",
-                        "Κάθε 3 μήνες",
-                        "Κάθε 6 μήνες",
-                        "Κάθε χρόνο",
-                    ],
-                ),
-                "Ολοκληρώθηκε": st.column_config.SelectboxColumn(
-                    "Ολοκληρώθηκε",
-                    options=["Όχι", "Ναι"],
-                    default="Όχι",
-                ),
-                "Πηγή χρημάτων": st.column_config.SelectboxColumn(
-                    "Πηγή χρημάτων",
-                    options=["Υπόλοιπο μήνα", "Αποταμίευση"],
-                    default="Υπόλοιπο μήνα",
-                ),
-                "Σχετική κίνηση": None,
-            },
-        )
-
-        st.session_state[extra_state_key] = extra_editor.copy()
-
-        safety_amount = money_text_input(
-            "Μαξιλάρι ασφαλείας",
-            key=f"budget_safety_{budget_year}_{budget_month}",
-            current_value=saved_budget.get("μαξιλάρι_ασφαλείας", 0),
-            help_text=(
-                "Ποσό που θέλεις να παραμείνει διαθέσιμο "
-                "και να μη χρησιμοποιηθεί."
-            ),
-        )
-        budget_values["μαξιλάρι_ασφαλείας"] = safety_amount
-        budget_values["άλλο_περιγραφή"] = ""
-        budget_values["άλλο_ποσό"] = 0.0
-
-        budget_notes = st.text_area(
-            "Σημείωση μήνα",
-            value=str(saved_budget.get("σημειώσεις", "")),
-            key=f"budget_notes_{budget_year}_{budget_month}",
-        )
-
-        total_income = sum(
-            budget_values[field]
-            for field, _, _ in (income_fields + personal_income_fields)
-        )
-        total_fixed_expenses = sum(
-            budget_values[field]
-            for field, _, _ in (expense_fields + personal_expense_fields)
-        )
-        extra_income = 0.0
-        extra_expenses = 0.0
-        if not extra_editor.empty:
-            for _, row in extra_editor.iterrows():
-                row_amount = float(parse_number(row.get("Ποσό", 0)))
-                if str(row.get("Τύπος", "Έξοδο")) == "Έσοδο":
-                    extra_income += row_amount
-                else:
-                    extra_expenses += row_amount
-
-        total_income += extra_income
-        total_expenses = total_fixed_expenses + extra_expenses
-        available = total_income - total_expenses - safety_amount
-
-        summary1, summary2, summary3 = st.columns(3)
-        summary1.metric(
-            "Προϋπολογισμένα έσοδα",
-            format_currency(total_income),
-            border=True,
-        )
-        summary2.metric(
-            "Προϋπολογισμένα έξοδα",
-            format_currency(total_expenses),
-            border=True,
-        )
-        summary3.metric(
-            "Προβλεπόμενο διαθέσιμο",
-            format_currency(available),
-            border=True,
-        )
-
-        if st.button(
-            "💾 Αποθήκευση σχεδίου μήνα",
-            use_container_width=True,
-            type="primary",
-            key=f"save_budget_{budget_year}_{budget_month}",
-        ):
-            try:
-                    # Δημιουργούμε τις κινήσεις των πρόσθετων γραμμών που μόλις
-                # σημειώθηκαν ως ολοκληρωμένες.
-                processed_extra = extra_editor.copy()
-                for row_index, row in processed_extra.iterrows():
-                    completed = str(
-                        row.get("Ολοκληρώθηκε", "Όχι")
-                    ) == "Ναι"
-                    existing_tx = str(
-                        row.get("Σχετική κίνηση", "")
-                    ).strip()
-                    amount = float(parse_number(row.get("Ποσό", 0)))
-                    item_type = str(row.get("Τύπος", "Έξοδο"))
-                    source = str(
-                        row.get("Πηγή χρημάτων", "Υπόλοιπο μήνα")
-                    )
-                    is_recurring = str(row.get("Πάγιο", "Όχι")) == "Ναι"
-                    frequency = str(
-                        row.get("Συχνότητα", "Κάθε μήνα")
-                    ) or "Κάθε μήνα"
-
-                    if completed and not existing_tx and amount > 0:
-                        if (
-                            item_type == "Έξοδο"
-                            and source == "Αποταμίευση"
-                            and amount > savings_total(savings_df)
-                        ):
-                            st.warning(
-                                f"Δεν ολοκληρώθηκε η γραμμή "
-                                f"«{row.get('Περιγραφή', '')}»: "
-                                "δεν επαρκεί η αποταμίευση."
-                            )
-                            processed_extra.at[
-                                row_index, "Ολοκληρώθηκε"
-                            ] = "Όχι"
-                            continue
-
-                        transaction_id = complete_budget_entry(
-                            budget_year,
-                            budget_month,
-                            f"extra_{row_index}",
-                            str(row.get("Περιγραφή", "")),
-                            str(row.get("Κατηγορία", "Άλλο")),
-                            item_type,
-                            amount,
-                            source,
-                            is_recurring,
-                        )
-                        processed_extra.at[
-                            row_index, "Σχετική κίνηση"
-                        ] = transaction_id
-
-                        if is_recurring:
-                            create_or_update_budget_recurring(
-                                "",
-                                str(row.get("Περιγραφή", "")),
-                                str(row.get("Κατηγορία", "Άλλο")),
-                                item_type,
-                                amount,
-                                frequency,
-                                budget_year,
-                                budget_month,
-                            )
-
-                save_monthly_budget(
-                    budget_year,
-                    budget_month,
-                    budget_values,
-                    budget_notes,
-                )
-
-                for field_code, settings in budget_line_settings.items():
-                    amount = float(parse_number(budget_values.get(field_code, 0)))
-                    status = settings["status"]
-                    recurring_id = str(status.get("σχετικό_πάγιο", "")).strip()
-
-                    has_existing_status = bool(str(status.get("id", "")).strip())
-                    has_meaningful_setting = (
-                        amount > 0
-                        or settings["is_recurring"]
-                        or has_existing_status
-                        or bool(str(status.get("σχετική_κίνηση", "")).strip())
-                    )
-
-                    if not has_meaningful_setting:
-                        continue
-
-                    if settings["is_recurring"] and amount > 0:
-                        recurring_id = create_or_update_budget_recurring(
-                            recurring_id,
-                            settings["label"],
-                            settings["category"],
-                            settings["item_type"],
-                            amount,
-                            settings["frequency"],
-                            budget_year,
-                            budget_month,
-                        )
-
-                    upsert_budget_status(
-                        budget_year,
-                        budget_month,
-                        field_code,
-                        settings["label"],
-                        settings["item_type"],
-                        settings["is_recurring"],
-                        settings["frequency"],
-                        (
-                            str(status.get("ολοκληρώθηκε", "Όχι")) == "Ναι"
-                            and bool(str(status.get("σχετική_κίνηση", "")).strip())
-                        ),
-                        str(status.get("πηγή_χρημάτων", "")),
-                        str(status.get("σχετική_κίνηση", "")),
-                        recurring_id,
-                    )
-
-                permanent_rows_to_save = []
-                for field_code, label, category in personal_income_fields:
-                    permanent_rows_to_save.append({
-                        "Περιγραφή": label,
-                        "Κατηγορία": category,
-                        "Τύπος": "Έσοδο",
-                        "Ποσό": float(parse_number(budget_values.get(field_code, 0))),
-                        "Πάγιο": "Όχι",
-                        "Συχνότητα": "",
-                        "Ολοκληρώθηκε": "Όχι",
-                        "Πηγή χρημάτων": "Υπόλοιπο μήνα",
-                        "Σχετική κίνηση": "",
-                        "Πηγή": "Μόνιμη γραμμή",
-                        "Σημειώσεις": "",
-                    })
-                for field_code, label, category in personal_expense_fields:
-                    permanent_rows_to_save.append({
-                        "Περιγραφή": label,
-                        "Κατηγορία": category,
-                        "Τύπος": "Έξοδο",
-                        "Ποσό": float(parse_number(budget_values.get(field_code, 0))),
-                        "Πάγιο": "Όχι",
-                        "Συχνότητα": "",
-                        "Ολοκληρώθηκε": "Όχι",
-                        "Πηγή χρημάτων": "Υπόλοιπο μήνα",
-                        "Σχετική κίνηση": "",
-                        "Πηγή": "Μόνιμη γραμμή",
-                        "Σημειώσεις": "",
-                    })
-
-                combined_budget_items = processed_extra.copy()
-                if permanent_rows_to_save:
-                    combined_budget_items = pd.concat(
-                        [
-                            combined_budget_items,
-                            pd.DataFrame(permanent_rows_to_save),
-                        ],
-                        ignore_index=True,
-                    )
-
-                save_budget_items(
-                    budget_year,
-                    budget_month,
-                    combined_budget_items,
-                )
-                st.success(
-                    f"Αποθηκεύτηκε ο προϋπολογισμός για "
-                    f"{month_full_names[budget_month]} {budget_year}."
-                )
-                st.rerun()
-
-            except gspread.exceptions.APIError:
-                st.error(
-                    "Η Google δεν απάντησε προσωρινά. "
-                    "Ο προϋπολογισμός δεν αποθηκεύτηκε πλήρως. "
-                    "Περίμενε λίγο και πάτησε ξανά Αποθήκευση."
-                )
-            except Exception as exc:
-                st.error("Παρουσιάστηκε σφάλμα κατά την αποθήκευση του σχεδίου.")
-                st.exception(exc)
-
-        st.divider()
-        render_export_buttons(
-            f"Προϋπολογισμός "
-            f"{month_full_names[budget_month]} {budget_year}",
-            {
-                "Πρόσθετες γραμμές": extra_editor,
-                "Σύνοψη": pd.DataFrame(
-                    [{
-                        "Έσοδα": total_income,
-                        "Έξοδα": total_expenses,
-                        "Μαξιλάρι": safety_amount,
-                        "Διαθέσιμο": available,
-                    }]
-                ),
-            },
-            f"budget_{budget_year}_{budget_month:02d}",
-            f"budget_export_{budget_year}_{budget_month}",
-        )
-
-
-    # =========================================================
-    # ΔΑΝΕΙΑ / ΚΑΡΤΕΣ
-    # =========================================================
-
-        st.divider()
-
 
     selected_month_start = pd.Timestamp(
         year=budget_year,
@@ -8409,185 +7590,136 @@ elif page == "🔁 Πάγια / Συνδρομές":
                             st.rerun()
 
 
-elif page == "📁 Έγγραφα / Εγγυήσεις":
-    st.header("Έγγραφα και εγγυήσεις")
-    render_export_buttons(
-        "Έγγραφα και εγγυήσεις",
-        {"Έγγραφα": documents_df},
-        "eggrafa_eggyiseis",
-        "documents_export",
-    )
-    st.caption("Λήξεις, εγγυήσεις, αποδείξεις και σημαντικά αρχεία.")
-
-    document_type = render_choice_buttons(
-        "Τύπος",
-        options_with_saved(
-            ["Έγγραφο", "Εγγύηση", "Συμβόλαιο", "Ιατρικό"],
-            "document_type",
-        ),
-        "document_type_buttons",
-        columns=2,
-    )
-    document_category = render_choice_buttons(
-        "Κατηγορία",
-        options_with_saved(
-            [
-                "Προσωπικά", "Αυτοκίνητο", "Σπίτι", "Υγεία",
-                "Ηλεκτρονικά", "Ασφάλειες",
-            ],
-            "document_category",
-        ),
-        "document_category_buttons",
-        columns=2,
+elif page == "💼 Φωτογραφία (επιχείρηση)":
+    st.header("Φωτογραφία · Επιχειρηματική εικόνα")
+    st.caption(
+        "Τα ίδια χρήματα, ένα ταμείο· αλλά εδώ βλέπεις μόνο τις "
+        "κινήσεις που έχεις σημειώσει ως «Φωτογραφία»."
     )
 
-    custom_document_type = ""
-    custom_document_category = ""
-    if document_type == "Άλλο":
-        custom_document_type = st.text_input(
-            "Γράψε τον τύπο εγγράφου",
-            key="custom_document_type",
+    business_df = transactions_df[
+        transactions_df.get(
+            "δραστηριότητα",
+            pd.Series(dtype=str),
         )
-    if document_category == "Άλλο":
-        custom_document_category = st.text_input(
-            "Γράψε την κατηγορία εγγράφου",
-            key="custom_document_category",
-        )
+        == "Φωτογραφία"
+    ].copy() if not transactions_df.empty else transactions_df.copy()
 
-    with st.form("document_form", clear_on_submit=True):
-        document_title = st.text_input(
-            "Τίτλος",
-            placeholder="π.χ. Εγγύηση πλυντηρίου ή Ασφάλεια αυτοκινήτου",
-        )
-        provider = st.text_input(
-            "Εταιρεία / φορέας",
-            placeholder="π.χ. Public, ασφαλιστική, ΚΕΠ",
-        )
-        d1, d2, d3 = st.columns(3)
-        with d1:
-            purchase_date = st.date_input(
-                "Ημερομηνία αγοράς / έκδοσης",
-                value=date.today(),
-            )
-        with d2:
-            expiry_date = st.date_input(
-                "Ημερομηνία λήξης",
-                value=date.today() + relativedelta(years=1),
-            )
-        with d3:
-            document_amount = st.number_input(
-                "Ποσό, αν υπάρχει",
-                min_value=0.0,
-                step=10.0,
-            )
-        document_file = st.file_uploader(
-            "Αρχείο ή φωτογραφία",
-            type=["pdf", "png", "jpg", "jpeg", "webp"],
-        )
-        document_notes = st.text_area("Σημειώσεις")
-        document_submit = st.form_submit_button(
-            "Αποθήκευση",
-            use_container_width=True,
-            type="primary",
-        )
+    business_years = sorted(
+        business_df["ημερομηνία"].dropna().dt.year.unique().tolist(),
+        reverse=True,
+    ) if not business_df.empty else []
 
-    if document_submit:
-        final_document_type = (
-            custom_document_type.strip()
-            if document_type == "Άλλο"
-            else document_type
-        )
-        final_document_category = (
-            custom_document_category.strip()
-            if document_category == "Άλλο"
-            else document_category
-        )
-        if not document_title.strip() or not final_document_type:
-            st.warning("Συμπλήρωσε τίτλο και τύπο.")
-        elif not final_document_category:
-            st.warning("Συμπλήρωσε κατηγορία.")
-        else:
-            if document_type == "Άλλο":
-                save_custom_option("document_type", final_document_type)
-            if document_category == "Άλλο":
-                save_custom_option(
-                    "document_category",
-                    final_document_category,
-                )
-            file_link = upload_to_drive(document_file)
-            append_document(
-                document_title.strip(),
-                final_document_type,
-                final_document_category,
-                purchase_date,
-                expiry_date,
-                document_amount,
-                provider,
-                file_link,
-                document_notes,
-            )
-            st.success("Το έγγραφο αποθηκεύτηκε.")
-            st.rerun()
+    current_business_year = datetime.now().year
+    if current_business_year not in business_years:
+        business_years.insert(0, current_business_year)
 
-    st.divider()
-    document_view = render_choice_buttons(
-        "Προβολή",
-        ["Ενεργά", "Λήγουν σύντομα", "Όλα"],
-        "document_view_buttons",
-        columns=3,
-    ) or "Ενεργά"
+    selected_business_year = st.number_input(
+        "Έτος",
+        min_value=2000,
+        max_value=2100,
+        value=current_business_year,
+        step=1,
+        key="business_year_filter",
+    )
 
-    visible_documents = documents_df.copy()
-    today_ts = pd.Timestamp.today().normalize()
+    business_month_labels = [
+        "Όλοι",
+        "Ιαν", "Φεβ", "Μαρ", "Απρ", "Μαϊ", "Ιουν",
+        "Ιουλ", "Αυγ", "Σεπ", "Οκτ", "Νοε", "Δεκ",
+    ]
+    selected_business_month_name = render_choice_buttons(
+        "Μήνας",
+        business_month_labels,
+        "business_month_buttons",
+        columns=4,
+    )
+    business_month_lookup = {
+        "Όλοι": 0,
+        "Ιαν": 1, "Φεβ": 2, "Μαρ": 3, "Απρ": 4,
+        "Μαϊ": 5, "Ιουν": 6, "Ιουλ": 7, "Αυγ": 8,
+        "Σεπ": 9, "Οκτ": 10, "Νοε": 11, "Δεκ": 12,
+    }
+    selected_business_month = business_month_lookup.get(
+        selected_business_month_name, 0
+    )
 
-    if document_view == "Ενεργά" and not visible_documents.empty:
-        visible_documents = visible_documents[
-            visible_documents["κατάσταση"] == "Ενεργό"
+    if not business_df.empty:
+        business_df = business_df[
+            business_df["ημερομηνία"].dt.year == int(selected_business_year)
         ]
-    elif document_view == "Λήγουν σύντομα" and not visible_documents.empty:
-        visible_documents = visible_documents[
-            (visible_documents["ημερομηνία_λήξης"] >= today_ts)
-            & (
-                visible_documents["ημερομηνία_λήξης"]
-                <= today_ts + pd.Timedelta(days=60)
-            )
-        ]
+        if selected_business_month:
+            business_df = business_df[
+                business_df["ημερομηνία"].dt.month
+                == int(selected_business_month)
+            ]
 
-    if visible_documents.empty:
-        st.info("Δεν υπάρχουν έγγραφα σε αυτή την προβολή.")
+    business_income = business_df.loc[
+        business_df["τύπος"] == "Έσοδο", "ποσό"
+    ].sum() if not business_df.empty else 0.0
+    business_expenses = business_df.loc[
+        business_df["τύπος"] == "Έξοδο", "ποσό"
+    ].sum() if not business_df.empty else 0.0
+
+    bcol1, bcol2, bcol3 = st.columns(3)
+    bcol1.metric("Έσοδα φωτογραφίας", format_currency(business_income), border=True)
+    bcol2.metric("Έξοδα φωτογραφίας", format_currency(business_expenses), border=True)
+    bcol3.metric(
+        "Καθαρό αποτέλεσμα",
+        format_currency(business_income - business_expenses),
+        border=True,
+    )
+
+    st.subheader("Κινήσεις φωτογραφίας")
+
+    if business_df.empty:
+        st.info(
+            "Δεν υπάρχουν ακόμη κινήσεις με δραστηριότητα «Φωτογραφία» "
+            "για αυτό το φίλτρο. Καταχώρησέ τες από τις "
+            "«Καθημερινές κινήσεις», επιλέγοντας δραστηριότητα «Φωτογραφία»."
+        )
     else:
-        for _, row in visible_documents.sort_values(
-            "ημερομηνία_λήξης"
-        ).iterrows():
-            expiry_text = (
-                row["ημερομηνία_λήξης"].strftime("%d/%m/%Y")
-                if not pd.isna(row["ημερομηνία_λήξης"])
-                else ""
-            )
-            days_left = (
-                (row["ημερομηνία_λήξης"].normalize() - today_ts).days
-                if not pd.isna(row["ημερομηνία_λήξης"])
-                else None
-            )
-            with st.container(border=True):
-                st.write(f"**{row['τίτλος']}**")
-                st.caption(
-                    f"{row['τύπος']} · {row['κατηγορία']} · "
-                    f"λήξη {expiry_text}"
-                )
-                if days_left is not None:
-                    st.caption(
-                        "Εκπρόθεσμο"
-                        if days_left < 0
-                        else f"Απομένουν {days_left} ημέρες"
-                    )
-                if row.get("αρχείο"):
-                    st.link_button(
-                        "Άνοιγμα αρχείου",
-                        row["αρχείο"],
-                        use_container_width=True,
-                    )
+        business_display = business_df.sort_values(
+            "ημερομηνία", ascending=False
+        ).copy()
+        business_display["ημερομηνία"] = (
+            business_display["ημερομηνία"].dt.strftime("%d/%m/%Y")
+        )
+        business_display["ποσό"] = business_display["ποσό"].apply(
+            format_currency
+        )
 
+        st.dataframe(
+            business_display[
+                [
+                    "ημερομηνία",
+                    "τύπος",
+                    "κατηγορία",
+                    "περιγραφή",
+                    "ποσό",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "ημερομηνία": "Ημερομηνία",
+                "τύπος": "Τύπος",
+                "κατηγορία": "Κατηγορία",
+                "περιγραφή": "Περιγραφή",
+                "ποσό": "Ποσό",
+            },
+        )
+
+        business_csv = business_df.copy()
+        business_csv["ημερομηνία"] = (
+            business_csv["ημερομηνία"].dt.strftime("%Y-%m-%d")
+        )
+        st.download_button(
+            "Λήψη κινήσεων φωτογραφίας σε CSV",
+            data=business_csv.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"fotografia_{int(selected_business_year)}.csv",
+            mime="text/csv",
+        )
 
 
 elif page == "📈 Οικονομική οργάνωση":
@@ -9202,6 +8334,13 @@ elif page == "📊 Ιστορικό":
             columns=3,
         ) or "Όλα"
 
+        final_activity = render_choice_buttons(
+            "Δραστηριότητα",
+            ["Όλες", "Προσωπικό", "Υπηρεσία", "Φωτογραφία"],
+            "history_activity_buttons",
+            columns=4,
+        ) or "Όλες"
+
         history_df = transactions_df[
             transactions_df["ημερομηνία"].dt.year == final_year
         ].copy()
@@ -9214,6 +8353,11 @@ elif page == "📊 Ιστορικό":
         if final_type != "Όλα":
             history_df = history_df[
                 history_df["τύπος"] == final_type
+            ]
+
+        if final_activity != "Όλες":
+            history_df = history_df[
+                history_df["δραστηριότητα"] == final_activity
             ]
 
         history_income = history_df.loc[
@@ -9261,6 +8405,7 @@ elif page == "📊 Ιστορικό":
                 "περιγραφή",
                 "ποσό",
                 "πηγή_χρημάτων",
+                "δραστηριότητα",
             ]
 
             st.dataframe(
@@ -9275,6 +8420,7 @@ elif page == "📊 Ιστορικό":
                     "ποσό": "Ποσό",
                     "τρόπος_πληρωμής": "Τρόπος",
                     "πάγιο": "Πάγιο",
+                    "δραστηριότητα": "Δραστηριότητα",
                     "αρχείο": st.column_config.LinkColumn(
                         "Αρχείο",
                         display_text="Άνοιγμα",
@@ -9807,4 +8953,3 @@ elif page == "⚙️ Ρυθμίσεις":
         """,
         unsafe_allow_html=True,
     )
-
